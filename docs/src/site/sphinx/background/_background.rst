@@ -3,13 +3,13 @@
 Background to the Very Slow Jython Project
 ##########################################
 
-The aim of the Very Slow Jython project is to re-think implementation choices
+The aim of the `Very Slow Jython`_ project is to re-think implementation choices
 in the `Jython`_ core,
 through the gradual, narrated evolution of a toy implementation.
 
 ..  _Jython: http://www.jython.org
 ..  _Python 1.6: https://www.python.org/download/releases/1.6.1
-
+..  _Very Slow Jython: https://github.com/jeff5/very-slow-jython
 
 Background to the project
 *************************
@@ -43,7 +43,7 @@ and some significant changes have been made to the Java language.
 
 The fundamental question of the Very Slow Jython project is,
 given that the desired behaviour is that of Python 3,
-and the language available is Java 8,
+and the language available is Java 11,
 what would we write if we started clean today?
 The answer is not wholly obvious, but we will answer it through a practical attempt.
 We can expect to make some false starts.
