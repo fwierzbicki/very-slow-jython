@@ -14,9 +14,9 @@ dependencies {
     //implementation 'org.ow2.asm:asm:9.+'
 
     // JUnit 5 dependencies
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.0'
-    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.8.0'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.+'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.10.+'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.+'
 }
 
 
@@ -120,9 +120,10 @@ processTestResources.dependsOn(compileTestPythonExamples)
 // Generate (selected) Python abstract object API members
 // Task defined in root buildSrc
 task generateDynamicAPIevo1(type: DynamicAPIevo1Task) {
+    dependsOn(compileJava)
     source = "src/main/dynamicAPI"
     // Mix output into Java plugin directory :(
-    destinationDir = file("$buildDir/classes/java/main")
+    destinationDirectory = file("$buildDir/classes/java/main")
     // Must be set but not actually consulted :(
     classpath = layout.files("$buildDir/classes/java/main")
 }
@@ -176,7 +177,7 @@ tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'
 
     // Use only public API
-    options.compilerArgs.addAll(['--release', '11'])
+    options.compilerArgs.addAll(['--release', '17'])
     // deprecation is noisy
     options.deprecation = true
     // retain parameter names (for use by exposer)

@@ -8,8 +8,8 @@ import uk.co.farowl.vsj3.evo1.Slot.EmptyException;
 
 /**
  * Selects a particular "rich comparison" operation from the repertoire
- * supported by {@link Opcode#COMPARE_OP}, the argument to which is the
- * {@code code} attribute of the name in this {@code enum}.
+ * supported by {@link Opcode311#COMPARE_OP}, the argument to which is
+ * the {@code code} attribute of the name in this {@code enum}.
  *
  * @apiNote The order matches CPython's enumeration of operations used
  *     in the argument to {@code COMPARE_OP}, so that we can rely on it
@@ -22,92 +22,86 @@ enum Comparison {
     LT("<", Slot.op_lt) {
 
         @Override
-        boolean toBool(int c) {
-            return c < 0;
-        }
+        boolean toBool(int c) { return c < 0; }
     },
 
     /** The {@code __le__} operation. */
     LE("<=", Slot.op_le) {
 
         @Override
-        boolean toBool(int c) {
-            return c <= 0;
-        }
+        boolean toBool(int c) { return c <= 0; }
     },
 
     /** The {@code __eq__} operation. */
     EQ("==", Slot.op_eq) {
 
         @Override
-        boolean toBool(int c) {
-            return c == 0;
-        }
+        boolean toBool(int c) { return c == 0; }
     },
 
     /** The {@code __ne__} operation. */
     NE("!=", Slot.op_ne) {
 
         @Override
-        boolean toBool(int c) {
-            return c != 0;
-        }
+        boolean toBool(int c) { return c != 0; }
     },
 
     /** The {@code __gt__} operation. */
     GT(">", Slot.op_gt) {
 
         @Override
-        boolean toBool(int c) {
-            return c > 0;
-        }
+        boolean toBool(int c) { return c > 0; }
     },
 
     /** The {@code __ge__} operation. */
     GE(">=", Slot.op_ge) {
 
         @Override
-        boolean toBool(int c) {
-            return c >= 0;
-        }
+        boolean toBool(int c) { return c >= 0; }
     },
 
-    /** The (reflected) {@code __contains__} operation. */
+    /**
+     * The {@code in} operation (reflected {@code __contains__}). Note
+     * that "{@code v in seq}" compiles to<pre>
+     *    LOAD_NAME    0 (v)
+     *    LOAD_NAME    1 (seq)
+     *    CONTAINS_OP  0
+     * </pre> which must lead to {@code seq.__contains__(v)}.
+     */
     IN("in", Slot.op_contains) {
 
         @Override
-        boolean toBool(int c) {
-            return c >= 0;
-        }
+        boolean toBool(int c) { return c >= 0; }
 
         @Override
-        Object apply(Object v, Object w) throws Throwable {
-            Operations vOps = Operations.of(v);
+        Object apply(Object v, Object seq) throws Throwable {
+            Operations ops = Operations.of(seq);
             try {
-                MethodHandle contains = slot.getSlot(vOps);
-                return (boolean) contains.invokeExact(w, v);
+                MethodHandle contains = slot.getSlot(ops);
+                return (boolean)contains.invokeExact(seq, v);
             } catch (Slot.EmptyException e) {
-                throw new TypeError(NOT_CONTAINER, vOps.type(v).name);
+                throw new TypeError(NOT_CONTAINER, ops.type(seq).name);
             }
         }
     },
 
-    /** The inverted (reflected) {@code __contains__} operation. */
+    /**
+     * The inverted {@code in} operation (reflected
+     * {@code __contains__}).
+     */
     NOT_IN("not in", Slot.op_contains) {
 
         @Override
-        boolean toBool(int c) {
-            return c < 0;
-        }
+        boolean toBool(int c) { return c < 0; }
 
         @Override
-        Object apply(Object v, Object w) throws Throwable {
-            Operations vOps = Operations.of(v);;
+        Object apply(Object v, Object seq) throws Throwable {
+            Operations ops = Operations.of(seq);
             try {
-                MethodHandle contains = slot.getSlot(vOps);
-                return (boolean) contains.invokeExact(w, v);
+                MethodHandle contains = slot.getSlot(ops);
+                return !(boolean)contains.invokeExact(seq, v);
             } catch (Slot.EmptyException e) {
-                throw new TypeError(NOT_CONTAINER, vOps.type(v).name);
+                throw new TypeError(NOT_CONTAINER, ops.type(seq).name);
             }
         }
     },
@@ -116,9 +110,7 @@ enum Comparison {
     IS("is") {
 
         @Override
-        boolean toBool(int c) {
-            return c == 0;
-        }
+        boolean toBool(int c) { return c == 0; }
 
         @Override
         Object apply(Object v, Object w) throws Throwable {
@@ -131,9 +123,7 @@ enum Comparison {
     IS_NOT("is not") {
 
         @Override
-        boolean toBool(int c) {
-            return c != 0;
-        }
+        boolean toBool(int c) { return c != 0; }
 
         @Override
         Object apply(Object v, Object w) throws Throwable {
@@ -145,9 +135,7 @@ enum Comparison {
     EXC_MATCH("matches") {
 
         @Override
-        boolean toBool(int c) {
-            return c == 0;
-        }
+        boolean toBool(int c) { return c == 0; }
 
         @Override
         Object apply(Object v, Object w) throws Throwable {
@@ -159,9 +147,7 @@ enum Comparison {
     BAD("?") {
 
         @Override
-        boolean toBool(int c) {
-            return false;
-        }
+        boolean toBool(int c) { return false; }
 
         @Override
         Object apply(Object v, Object w) throws Throwable {
@@ -177,9 +163,7 @@ enum Comparison {
         this.slot = slot;
     }
 
-    Comparison(String text) {
-        this(text, null);
-    }
+    Comparison(String text) { this(text, null); }
 
     /**
      * The text corresponding to the value, e.g. "!=" for {@code NE},
@@ -188,12 +172,10 @@ enum Comparison {
      * @return text corresponding
      */
     @Override
-    public String toString() {
-        return text;
-    }
+    public String toString() { return text; }
 
     /**
-     * Translate CPython {@link Opcode#COMPARE_OP} opcode argument to
+     * Translate CPython {@link Opcode311#COMPARE_OP} opcode argument to
      * Comparison constant.
      *
      * @param oparg opcode argument
@@ -210,9 +192,7 @@ enum Comparison {
      *
      * @return swapped version of this comparison
      */
-    Comparison swapped() {
-        return swap[this.ordinal()];
-    }
+    Comparison swapped() { return swap[this.ordinal()]; }
 
     private static final Comparison[] swap =
             {GT, GE, EQ, NE, LT, LE, BAD, BAD, IS, IS_NOT, BAD, BAD};

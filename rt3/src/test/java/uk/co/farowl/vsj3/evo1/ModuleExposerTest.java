@@ -1,3 +1,5 @@
+// Copyright (c)2023 Jython Developers.
+// Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -147,8 +149,8 @@ class ModuleExposerTest extends UnitTestSupport {
         void hasMethods() {
             /*
              * As FakeModule is not a PyModule, we must work a bit
-             * harder to take care of things normally automatic. Make a
-             * ModuleDef to hold the MethodDefs from the Exposer.
+             * harder to take care of things later masde automatic. Make
+             * a ModuleDef to hold the MethodDefs from the Exposer.
              */
             ModuleDef def = new ModuleDef("example", FakeModule.LOOKUP);
             // An instance of the "module" to bind in PyJavaMethods
@@ -159,8 +161,8 @@ class ModuleExposerTest extends UnitTestSupport {
             for (MethodDef md : def.getMethods()) {
                 ArgParser ap = md.argParser;
                 MethodHandle mh = md.handle;
-                PyJavaMethod m =
-                        PyJavaMethod.fromParser(ap, mh, fake, def.name);
+                PyJavaFunction m = PyJavaFunction.forModule(ap, mh,
+                        fake, def.name);
                 dict.put(md.argParser.name, m);
             }
             // And here we check what's in it
@@ -211,8 +213,8 @@ class ModuleExposerTest extends UnitTestSupport {
         assertTrue(k > 0);
         String name = spec.substring(0, k);
         String expect = spec.substring(k);
-        PyJavaMethod pjm = (PyJavaMethod)dict.get(name);
-        assertEquals(expect, pjm.argParser.textSignature());
+        PyJavaFunction pjf = (PyJavaFunction)dict.get(name);
+        assertEquals(expect, pjf.argParser.textSignature());
     }
 
 }

@@ -1,3 +1,5 @@
+// Copyright (c)2023 Jython Developers.
+// Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,11 +26,13 @@ import uk.co.farowl.vsj3.evo1.Exposed.Member;
 import uk.co.farowl.vsj3.evo1.Exposed.PositionalCollector;
 import uk.co.farowl.vsj3.evo1.Exposed.PositionalOnly;
 import uk.co.farowl.vsj3.evo1.Exposed.PythonMethod;
+import uk.co.farowl.vsj3.evo1.Exposed.PythonNewMethod;
 import uk.co.farowl.vsj3.evo1.Exposed.PythonStaticMethod;
 import uk.co.farowl.vsj3.evo1.Exposed.Setter;
 import uk.co.farowl.vsj3.evo1.Exposer.CallableSpec;
 import uk.co.farowl.vsj3.evo1.TypeExposer.GetSetSpec;
 import uk.co.farowl.vsj3.evo1.TypeExposer.MemberSpec;
+import uk.co.farowl.vsj3.evo1.base.MethodKind;
 
 /**
  * Test that the annotations defined in {@link Exposed}, and intended
@@ -55,6 +59,11 @@ class TypeExposerTest {
     static class Fake {
 
         static final Lookup LOOKUP = MethodHandles.lookup();
+
+        // A simple __new__ with signature: (type, /)
+        @PythonNewMethod
+        static Fake __new__(PyType type) { return new Fake(); }
+
 
         // Instance methods -------------------------------------------
 
@@ -278,7 +287,7 @@ class TypeExposerTest {
     @DisplayName("has the expected number of methods.")
     @SuppressWarnings("static-method")
     void numberOfMethods() {
-        assertEquals(12, methods.size(), "number of methods");
+        assertEquals(13, methods.size(), "number of methods");
     }
 
     /**
@@ -290,6 +299,7 @@ class TypeExposerTest {
     @ParameterizedTest(name = "{0}")
     @DisplayName("has a method with signature ...")
     @ValueSource(strings = { //
+            "__new__(type, /)", //
             "f0()", //
             "m0($self, /)", //
             "f3(a, b, c, /)", //
@@ -312,6 +322,21 @@ class TypeExposerTest {
         CallableSpec ms = find(methods, name);
         ArgParser ap = ms.getParser();
         assertEquals(expect, ap.textSignature());
+        MethodKind expectedMethodKind = inferMethodKind(name);
+        assertEquals(expectedMethodKind, ap.methodKind);
+        assertEquals(ScopeKind.TYPE, ap.scopeKind);
+    }
+
+    private static MethodKind inferMethodKind(String name) {
+        if ("__new__".equals(name)) {
+            return MethodKind.NEW;
+        } else if (name.startsWith("m")) {
+            return MethodKind.INSTANCE;
+        } else if (name.startsWith("c")) {
+            return MethodKind.CLASS;
+        } else {
+            return MethodKind.STATIC;
+        }
     }
 
     // ----------------------------------------------------------------

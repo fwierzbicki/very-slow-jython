@@ -439,11 +439,10 @@ abstract class PyMemberDescr extends DataDescriptor {
             // Special-case None if *not* an optional attribute
             if (value == Py.None && !optional) {
                 delete(obj);
-                return;
-            } else if (!PyUnicode.TYPE.check(value))
-                throw attrMustBe("a string", value);
-            else {
-                String v = value.toString();
+            } else {
+                String v = PyUnicode.asString(value,
+                        (o) -> attrMustBe("a string", o));
+                // String v = value.toString();
                 handle.set(obj, v);
             }
         }
@@ -481,14 +480,8 @@ abstract class PyMemberDescr extends DataDescriptor {
             try {
                 handle.set(obj, value);
             } catch (ClassCastException cce) {
-                // Here if the type of the field is an object sub-type
-                Class<?> javaType = handle.varType();
-                /*
-                 * This is a surprising place to discover a need to map
-                 * Java classes to Python types. Do without for now.
-                 */
-                String typeName = javaType.getSimpleName();
-                throw attrMustBe(typeName, value);
+                // Raise TypeError mentioning Python type of field.
+                throw attrMustBe(handle.varType(), value);
             }
         }
     }

@@ -1,9 +1,9 @@
-// Copyright (c)2021 Jython Developers.
-// Copyright (c) Corporation for National Research Initiatives
+// Copyright (c)2023 Jython Developers.
 // Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
 import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Array;
 import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -11,6 +11,8 @@ import java.util.Iterator;
 import java.util.ListIterator;
 import java.util.NoSuchElementException;
 import java.util.StringJoiner;
+import java.util.function.Function;
+import java.util.stream.Stream;
 
 import uk.co.farowl.vsj3.evo1.PyObjectUtil.NoConversion;
 import uk.co.farowl.vsj3.evo1.PySlice.Indices;
@@ -130,6 +132,13 @@ public class PyTuple extends AbstractList<Object>
     }
 
     /**
+     * Construct a {@code PyTuple} from the elements of a stream.
+     *
+     * @param s source of element values for this {@code tuple}
+     */
+    PyTuple(Stream<?> s) { this(TYPE, true, s.toArray()); }
+
+    /**
      * As {@link #PyTuple(Object[], int, int)} for Python sub-class
      * specifying {@link #type}.
      *
@@ -185,6 +194,77 @@ public class PyTuple extends AbstractList<Object>
      */
     static <E> PyTuple from(Collection<E> c) {
         return c.size() == 0 ? EMPTY : new PyTuple(c);
+    }
+
+    /**
+     * Check that all the objects in this tuple are of the required Java
+     * type and return a new array of that type containing them. In
+     * certain parts of the interpreter, we represent as tuples arrays
+     * of objects that have to have a particular Java type. (An example
+     * is the closure of a {@code function} object in which every
+     * element must be a {@code PyCell}.) We throw the specified
+     * exception if we encounter an element that is not of the required
+     * Java type (or a sub-type).
+     * <p>
+     * Note that it is the Java type that is checked. This method is not
+     * entirely suitable for enforcing a specified Python type where the
+     * desired type has multiple implementations.
+     *
+     * @param <T> the Java type of element the tuple has to contain
+     * @param <E> type of exception to throw
+     * @param klass a class object for the element Java type
+     * @param exc to supply the exception based on the offending element
+     * @return {@code T[]} array of tuple elements
+     * @throws E if an element is not of Java type {@code T}
+     */
+    @SuppressWarnings("unchecked")
+    <T, E extends Throwable> T[] toArray(Class<T> klass,
+            Function<Object, E> exc) throws E {
+        T[] a = (T[])Array.newInstance(klass, value.length);
+        int i = 0;
+        for (Object v : value) {
+            try {
+                /*
+                 * Although the cast is not checked at runtime, since T
+                 * is erased to Object, the JVM defends the array from
+                 * the wrong kind of element.
+                 */
+                a[i++] = (T)v;
+            } catch (ArrayStoreException e) {
+                throw exc.apply(v);
+            }
+        }
+        return a;
+    }
+
+    /**
+     * Check that all the objects in this tuple are of the required Java
+     * type and return a new array of that type containing them. We
+     * throw an {@link InterpreterError} if we encounter an element that
+     * is not of the required Java type (or a sub-type).
+     *
+     * @param <T> the Java type of element the tuple has to contain
+     * @param klass a class object for the element Java type
+     * @return {@code T[]} array of tuple elements
+     * @throws InterpreterError if an element is not of Java type
+     *     {@code T}
+     */
+    <T> T[] toArray(Class<T> klass) {
+        return toArray(klass,
+                v -> new InterpreterError(
+                        "tuple element has incorrect Java element %s",
+                        v.getClass()));
+    }
+
+    /**
+     * Create a Python {@code dict} from this {@code tuple} taking its
+     * elements as a key and corresponding value alternately. The last
+     * element of a tuple with odd length is ignored.
+     *
+     * @return the {@code dict} of the key-value pairs
+     */
+    PyDict pairsToDict() {
+        return PyDict.fromKeyValuePairs(value, 0, value.length / 2);
     }
 
     @Override
@@ -277,10 +357,10 @@ public class PyTuple extends AbstractList<Object>
 
     private int __hash__() throws Throwable {
         /*
-         * Ported from C in CPython 3.8, which in turn is based on the
-         * xxHash specification. We do not attempt to maintain historic
-         * hash of () or avoid returning -1. Seed the accumulator based
-         * on the length.
+         * Ported from C in CPython 3.11 tupleobject.c, which in turn is
+         * based on the xxHash specification. We do not attempt to
+         * maintain historic hash of the empty tuple or avoid returning
+         * -1. Seed the accumulator based on the length.
          */
         int acc = H32P5 * value.length;
         for (Object x : value) {
@@ -301,6 +381,12 @@ public class PyTuple extends AbstractList<Object>
         for (Object item : value) { if (item.equals(v)) { count++; } }
         return count;
     }
+
+    @SuppressWarnings("unused")
+    private Object __repr__() { return toString(); }
+
+    @SuppressWarnings("unused")
+    private Object __str__() { return toString(); }
 
     /*
      * @ExposedMethod(defaults = {"null", "null"}, doc =
@@ -454,7 +540,7 @@ public class PyTuple extends AbstractList<Object>
          * @param seq supplying elements to append
          * @return this builder
          */
-        public Builder append(Collection<?> seq) {
+        public Builder extend(Collection<?> seq) {
             ensure(seq.size());
             for (Object v : seq) { value[len++] = v; }
             return this;
@@ -466,7 +552,7 @@ public class PyTuple extends AbstractList<Object>
          * @param iter supplying elements to append
          * @return this builder
          */
-        public Builder append(Iterator<?> iter) {
+        public Builder extend(Iterator<?> iter) {
             while (iter.hasNext()) { append(iter.next()); }
             return this;
         }

@@ -1,128 +1,27 @@
+// Copyright (c)2023 Jython Developers.
+// Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
 import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
-import java.math.BigInteger;
 
 /** Common run-time constants and constructors. */
 public class Py {
 
-    private static class Singleton implements CraftedPyObject {
-
-        final PyType type;
-
-        @Override
-        public PyType getType() { return type; }
-
-        String name;
-
-        Singleton(String name) {
-            this.name = name;
-            type = PyType.fromSpec(
-                    new PyType.Spec(name, MethodHandles.lookup())
-                            .canonical(getClass())
-                            .flagNot(PyType.Flag.BASETYPE));
-        }
-
-        @Override
-        public String toString() {
-            return name;
-        }
-    }
-
     /** Python {@code None} object. */
-    public static final Object None = new Singleton("None") {};
+    public static final PyNone None = PyNone.INSTANCE;
+
+    /** Python {@code ...} (ellipsis) object. */
+    public static final PyEllipsis Ellipsis = PyEllipsis.INSTANCE;
 
     /** Python {@code NotImplemented} object. */
-    static final Object NotImplemented =
-            new Singleton("NotImplemented") {};
-
-    /**
-     * Return Python {@code int} for Java {@code int}.
-     *
-     * @param value to represent
-     * @return equivalent {@code int}
-     * @deprecated Use primitive auto-boxed or {@code Integer.valueOf}.
-     */
-    @Deprecated
-    public static Integer val(int value) {
-        return value;
-    }
-
-    /**
-     * Return Python {@code int} for Java {@code long}.
-     *
-     * @param value to represent
-     * @return equivalent {@code int}
-     */
-    public static BigInteger val(long value) {
-        return BigInteger.valueOf(value);
-    }
-
-    /**
-     * Return Python {@code int} for Java {@code BigInteger}.
-     *
-     * @param value to wrap
-     * @return equivalent {@code int}
-     * @deprecated Use BigInteger directly.
-     */
-    @Deprecated
-    public static BigInteger val(BigInteger value) {
-        return value;
-    }
-
-    /**
-     * Return Python {@code float} for Java {@code double}.
-     *
-     * @param value to represent
-     * @return equivalent {@code float}
-     * @deprecated Use primitive auto-boxed or {@code Double.valueOf}.
-     */
-    // @Deprecated // Just use primitive auto-boxed
-    @Deprecated
-    public static Double val(double value) {
-        return value;
-    }
-
-    /**
-     * Return Python {@code bool} (one of {@link #True} or
-     * {@link #False}) for Java {@code boolean}.
-     *
-     * @param value to represent
-     * @return equivalent {@code bool}
-     * @deprecated Use primitive auto-boxed or {@code Boolean.valueOf}.
-     */
-    @Deprecated // Just
-    static Boolean val(boolean value) {
-        return value;
-    }
+    public static final PyNotImplemented NotImplemented =
+            PyNotImplemented.INSTANCE;
 
     /** Python {@code False} object. */
     public static final Boolean False = false;
 
     /** Python {@code True} object. */
     public static final Boolean True = true;
-
-    /**
-     * Return a Python {@code object}.
-     *
-     * @return {@code object()}
-     */
-    static PyBaseObject object() {
-        return new PyBaseObject();
-    }
-
-    /**
-     * Return Python {@code str} for Java {@code String}.
-     *
-     * @param value to wrap
-     * @return equivalent {@code str}
-     * @deprecated Use {@code String} directly.
-     */
-    @Deprecated
-    public static Object str(String value) {
-        return value;
-    }
 
 // /**
 // * Return Python {@code bytes} for Java {@code byte[]} (copy).
@@ -176,12 +75,13 @@ public class Py {
      *
      * @return {@code dict()}
      */
-    public static PyDict dict() {
-        return new PyDict();
-    }
+    public static PyDict dict() { return new PyDict(); }
 
-    /** Empty (zero-length) array of {@link Object}. */
+    /** Empty (zero-length) array of {@code Object}. */
     static final Object[] EMPTY_ARRAY = new Object[0];
+
+    /** Empty (zero-length) array of {@code String}. */
+    static final String[] EMPTY_STRING_ARRAY = new String[0];
 
     /**
      * Convenient default toString implementation that tries __str__, if
@@ -219,6 +119,20 @@ public class Py {
             }
             return "<" + name + " object>";
         }
+    }
+
+    /**
+     * Return the unique numerical identiy of a given Python object.
+     * Objects with the same id() are identical as long as both exist.
+     * By implementing it here, we encapsulate the problem of qualified
+     * type name and what "address" or "identity" should mean.
+     *
+     * @param o the object
+     * @return the Python {@code id(o)}
+     */
+    static int id(Object o) {
+        // For the time being identity means:
+        return System.identityHashCode(o);
     }
 
     // Interpreter ---------------------------------------------------

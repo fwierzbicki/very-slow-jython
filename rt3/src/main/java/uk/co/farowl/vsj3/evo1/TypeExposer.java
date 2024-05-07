@@ -1,4 +1,4 @@
-// Copyright (c)2022 Jython Developers.
+// Copyright (c)2023 Jython Developers.
 // Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import uk.co.farowl.vsj3.evo1.Exposed.Deleter;
@@ -25,12 +26,14 @@ import uk.co.farowl.vsj3.evo1.Exposed.DocString;
 import uk.co.farowl.vsj3.evo1.Exposed.Getter;
 import uk.co.farowl.vsj3.evo1.Exposed.Member;
 import uk.co.farowl.vsj3.evo1.Exposed.PythonMethod;
+import uk.co.farowl.vsj3.evo1.Exposed.PythonNewMethod;
 import uk.co.farowl.vsj3.evo1.Exposed.PythonStaticMethod;
 import uk.co.farowl.vsj3.evo1.Exposed.Setter;
 import uk.co.farowl.vsj3.evo1.Operations.BinopGrid;
 import uk.co.farowl.vsj3.evo1.PyMemberDescr.Flag;
 import uk.co.farowl.vsj3.evo1.Slot.Signature;
 import uk.co.farowl.vsj3.evo1.base.InterpreterError;
+import uk.co.farowl.vsj3.evo1.base.MethodKind;
 
 class TypeExposer extends Exposer {
 
@@ -122,40 +125,48 @@ class TypeExposer extends Exposer {
     void scanJavaMethods(Class<?> defsClass) throws InterpreterError {
 
         // Iterate over methods looking for those to expose
-        for (Method m : defsClass.getDeclaredMethods()) {
-            /*
-             * Note: method annotations (and special names) are not
-             * treated as alternatives, to catch exposure of methods by
-             * multiple routes.
-             */
+        for (Class<?> c : superClasses(defsClass)) {
+            for (Method m : c.getDeclaredMethods()) {
+                /*
+                 * Note: method annotations (and special names) are not
+                 * treated as alternatives, to catch exposure of methods
+                 * by multiple routes.
+                 */
 
-            // Check for instance method
-            PythonMethod pm =
-                    m.getDeclaredAnnotation(PythonMethod.class);
-            if (pm != null) { addMethodSpec(m, pm); }
+                // Check for instance method
+                PythonMethod pm =
+                        m.getDeclaredAnnotation(PythonMethod.class);
+                if (pm != null) { addMethodSpec(m, pm); }
 
-            // Check for static method
-            PythonStaticMethod psm =
-                    m.getDeclaredAnnotation(PythonStaticMethod.class);
-            if (psm != null) { addStaticMethodSpec(m, psm); }
+                // Check for static method
+                PythonStaticMethod psm = m.getDeclaredAnnotation(
+                        PythonStaticMethod.class);
+                if (psm != null) { addStaticMethodSpec(m, psm); }
 
-            // XXX Check for class method
-            // PythonClassMethod pcm =
-            // m.getDeclaredAnnotation(PythonClassMethod.class);
-            // if (pcm != null) { addClassMethodSpec(m, pcm); }
+                // Check for ___new__ method
+                PythonNewMethod pnm = m.getDeclaredAnnotation(
+                        PythonNewMethod.class);
+                if (pnm != null) { addNewMethodSpec(m, pnm, type); }
 
-            // Check for getter, setter, deleter methods
-            Getter get = m.getAnnotation(Getter.class);
-            if (get != null) { addGetter(m, get); }
-            Setter set = m.getAnnotation(Setter.class);
-            if (set != null) { addSetter(m, set); }
-            Deleter del = m.getAnnotation(Deleter.class);
-            if (del != null) { addDeleter(m, del); }
+                // XXX Check for class method
+                // PythonClassMethod pcm =
+                // m.getDeclaredAnnotation(PythonClassMethod.class);
+                // if (pcm != null) { addClassMethodSpec(m, pcm); }
 
-            // If it has a special method name record that definition.
-            String name = m.getName();
-            Slot slot = Slot.forMethodName(name);
-            if (slot != null) { addWrapperSpec(m, slot); }
+                // Check for getter, setter, deleter methods
+                Getter get = m.getAnnotation(Getter.class);
+                if (get != null) { addGetter(m, get); }
+                Setter set = m.getAnnotation(Setter.class);
+                if (set != null) { addSetter(m, set); }
+                Deleter del = m.getAnnotation(Deleter.class);
+                if (del != null) { addDeleter(m, del); }
+
+                // If it has a special method name record that
+                // definition.
+                String name = m.getName();
+                Slot slot = Slot.forMethodName(name);
+                if (slot != null) { addWrapperSpec(m, slot); }
+            }
         }
     }
 
@@ -170,9 +181,8 @@ class TypeExposer extends Exposer {
      */
     private void addGetter(Method m, Getter anno) {
         addSpec(m, anno.value(), TypeExposer::castGetSet,
-                GetSetSpec::new, ms -> {
-                    getSetSpecs.add(ms);
-                }, GetSetSpec::addGetter);
+                GetSetSpec::new, ms -> getSetSpecs.add(ms),
+                GetSetSpec::addGetter);
     }
 
     /**
@@ -187,9 +197,8 @@ class TypeExposer extends Exposer {
      */
     private void addSetter(Method m, Setter anno) {
         addSpec(m, anno.value(), TypeExposer::castGetSet,
-                GetSetSpec::new, ms -> {
-                    getSetSpecs.add(ms);
-                }, GetSetSpec::addSetter);
+                GetSetSpec::new, ms -> getSetSpecs.add(ms),
+                GetSetSpec::addSetter);
     }
 
     /**
@@ -204,9 +213,8 @@ class TypeExposer extends Exposer {
      */
     private void addDeleter(Method m, Deleter anno) {
         addSpec(m, anno.value(), TypeExposer::castGetSet,
-                GetSetSpec::new, ms -> {
-                    getSetSpecs.add(ms);
-                }, GetSetSpec::addDeleter);
+                GetSetSpec::new, ms -> getSetSpecs.add(ms),
+                GetSetSpec::addDeleter);
     }
 
     /**
@@ -243,6 +251,34 @@ class TypeExposer extends Exposer {
     }
 
     /**
+     * Process an annotation that identifies a {@code __new__} method of
+     * a Python type or module defined in Java, into a specification for
+     * a method, and add it to the table of specifications by name.
+     *
+     * @param anno annotation encountered
+     * @param meth method annotated
+     * @param type defining type ({@code __self__} in the exposed form)
+     * @throws InterpreterError on duplicates or unsupported types
+     */
+    void addNewMethodSpec(Method meth, PythonNewMethod anno,
+            PyType type) throws InterpreterError {
+        // For clarity, name lambda expressions for the actions
+        BiConsumer<NewMethodSpec, Method> addMethod =
+                // Add method m to spec ms
+                (NewMethodSpec ms, Method m) -> {
+                    ms.add(m, true, true, MethodKind.NEW);
+                };
+        Function<Spec, NewMethodSpec> cast =
+                // Test and cast a found Spec to NewMethodSpec
+                spec -> spec instanceof NewMethodSpec
+                        ? (NewMethodSpec)spec : null;
+        // Now use the generic create/update
+        addSpec(meth, anno.value(), cast,
+                (String name) -> new NewMethodSpec(name, type),
+                ms -> methodSpecs.add(ms), addMethod);
+    }
+
+    /**
      * Add to {@link #specs}, definitions of fields found in the given
      * class and annotated for exposure.
      *
@@ -250,12 +286,12 @@ class TypeExposer extends Exposer {
      * @throws InterpreterError on duplicates or unsupported types
      */
     void scanJavaFields(Class<?> defsClass) throws InterpreterError {
-
-        // Iterate over methods looking for those to expose
-        for (Field f : defsClass.getDeclaredFields()) {
-            // Check for instance method
-            Member m = f.getDeclaredAnnotation(Member.class);
-            if (m != null) { addMemberSpec(f, m); }
+        // Iterate over fields looking for the relevant annotations
+        for (Class<?> c : superClasses(defsClass)) {
+            for (Field f : c.getDeclaredFields()) {
+                Member m = f.getDeclaredAnnotation(Member.class);
+                if (m != null) { addMemberSpec(f, m); }
+            }
         }
     }
 
@@ -460,6 +496,8 @@ class TypeExposer extends Exposer {
         final List<Method> setters;
         /** Collects the deleters declared (often just one). */
         final List<Method> deleters;
+        /** Java class of attribute from setter parameter. */
+        Class<?> klass = Object.class;
 
         GetSetSpec(String name) {
             super(name, ScopeKind.TYPE);
@@ -506,6 +544,8 @@ class TypeExposer extends Exposer {
             setters.add(method);
             // There may be a @DocString annotation
             maybeAddDoc(method);
+            // Process parameters of the Setter
+            determineAttrType(method);
         }
 
         /**
@@ -518,6 +558,30 @@ class TypeExposer extends Exposer {
             deleters.add(method);
             // There may be a @DocString annotation
             maybeAddDoc(method);
+        }
+
+        /**
+         * Deduce the attribute type from the (raw) set method
+         * signature. We do this in order to give a sensible
+         * {@link TypeError} when a cast fails for the
+         * {@link PyGetSetDescr#__set__} operation.
+         *
+         * @param method annotated with a {@code Setter}
+         */
+        private void determineAttrType(Method method) {
+            // Save class of value accepted (if signature is sensible)
+            int modifiers = method.getModifiers();
+            int v = (modifiers & Modifier.STATIC) != 0 ? 1 : 0;
+            Class<?>[] paramClasses = method.getParameterTypes();
+            if (paramClasses.length == v + 1) {
+                Class<?> valueClass = paramClasses[v];
+                if (valueClass == klass) {
+                    // No change
+                } else if (klass.isAssignableFrom(valueClass)) {
+                    // The parameter is more specific than klass
+                    klass = valueClass;
+                }
+            }
         }
 
         @Override
@@ -575,7 +639,7 @@ class TypeExposer extends Exposer {
             }
 
             return new PyGetSetDescr.Multiple(objclass, name, g, s, d,
-                    doc);
+                    doc, klass);
         }
 
         private MethodHandle[] unreflect(PyType objclass, Lookup lookup,
@@ -642,9 +706,10 @@ class TypeExposer extends Exposer {
 
                 // We should have a value in each of method[]
                 if (method[i] == null) {
-                    throw new InterpreterError(
-                            "'%s.%s' not defined for %s", objclass.name,
-                            name, objclass.classes[i]);
+                    PyGetSetDescr.Type dt =
+                            PyGetSetDescr.Type.fromMethodType(mt);
+                    throw new InterpreterError(ATTR_NOT_IMPL, dt, name,
+                            objclass.name, objclass.classes[i]);
                 }
             }
 
@@ -656,6 +721,10 @@ class TypeExposer extends Exposer {
              */
             return method;
         }
+
+        private static String ATTR_NOT_IMPL =
+                "%s of attribute '%s' of '%s' objects"
+                        + " is not defined for implementation %s";
 
         @Override
         Class<? extends Annotation> annoClass() {
@@ -850,6 +919,68 @@ class TypeExposer extends Exposer {
                         .isAssignableFrom(mt.parameterType(i));
                 if (!ok) { throw new WrongMethodTypeException(); }
             }
+        }
+    }
+
+    /**
+     * Specification in which we assemble information about a Python
+     * {@code __new__} method in advance of creating a function
+     *  {@link PyJavaFunction}.
+     */
+    static class NewMethodSpec extends CallableSpec {
+
+        /** The defining Python type. */
+        final private PyType type;
+
+        NewMethodSpec(String name, PyType type) {
+            super(name, ScopeKind.TYPE);
+            this.type = type;
+        }
+
+        /**
+         * {@inheritDoc}
+         * <p>
+         * In a type, the attribute representing a {@code __new__} method
+         * is a
+         * {@code PyJavaFunction}. This method creates it from the
+         * specification.
+         * <p>
+         * Note that a specification describes the method as declared,
+         * and that there must be exactly one, even if there are
+         * multiple implementations of the type.
+         *
+         * @param objclass Python type that owns the method
+         * @param lookup authorisation to access members
+         * @return function for access to the method
+         * @throws InterpreterError if the method type is not supported
+         */
+        @Override
+        PyJavaFunction asAttribute(PyType objclass, Lookup lookup) {
+            assert methodKind == MethodKind.NEW;
+            ArgParser ap = getParser();
+
+            // There should be exactly one candidate implementation.
+            if (methods.size() != 1) {
+                throw new InterpreterError("%s has %d definitions in ",
+                        name, methods.size(), getJavaName());
+            }
+
+            Method m = methods.get(0);
+            try {
+                // Convert m to a handle (if accessible)
+                MethodHandle mh = lookup.unreflect(m);
+                assert mh.type().parameterCount() == regargcount;
+                PyJavaFunction javaFunction =
+                        PyJavaFunction.forNewMethod(ap, mh, type);
+                return javaFunction;
+            } catch (IllegalAccessException e) {
+                throw cannotGetHandle(m, e);
+            }
+        }
+
+        @Override
+        Class<? extends Annotation> annoClass() {
+            return PythonNewMethod.class;
         }
     }
 

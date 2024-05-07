@@ -1,4 +1,4 @@
-// Copyright (c)2022 Jython Developers.
+// Copyright (c)2023 Jython Developers.
 // Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
@@ -12,12 +12,13 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 
 import uk.co.farowl.vsj3.evo1.Slot.EmptyException;
+import uk.co.farowl.vsj3.evo1.base.InterpreterError;
 import uk.co.farowl.vsj3.evo1.base.MethodKind;
 
 /**
  * The {@code enum MethodSignature} enumerates the method signatures for
  * which an optimised implementation is possible. Sub-classes of
- * {@link PyJavaMethod} and {@link PyMethodDescr} correspond to these
+ * {@link PyJavaFunction} and {@link PyMethodDescr} correspond to these
  * values. It is not required that each value have a distinct optimised
  * sub-class. This {@code enum} is used internally to choose between
  * these sub-classes.
@@ -47,7 +48,8 @@ enum MethodSignature {
     /**
      * The type of method handles matching this method signature when it
      * describes a bound or static method. For {@code POSITIONAL} this
-     * is the type {@code (O[])O}.
+     * is the type {@code (O[])O}. For {@code NOARGS} this is the type
+     * {@code ()O}. For {@code O1} this is the type {@code (O)O}.
      */
     final MethodType boundType;
 
@@ -55,7 +57,9 @@ enum MethodSignature {
      * The type of method handles matching this method signature when it
      * describes an instance method. This differs from
      * {@link #boundType} by a preceding {@code O}. For
-     * {@code POSITIONAL} this is the type {@code (O, O[])O}.
+     * {@code POSITIONAL} this is the type {@code (O,O[])O}. For
+     * {@code NOARGS} this is the type {@code (O)O}. For {@code O1} this
+     * is the type {@code (O,O)O}.
      */
     final MethodType instanceType;
 
@@ -177,21 +181,34 @@ enum MethodSignature {
     MethodHandle prepare(ArgParser ap, MethodHandle raw) {
         assert raw != null;
         MethodHandle mh;
-        if (ap.methodKind == MethodKind.STATIC) {
-            // No self parameter: start at zero
-            mh = adapt(raw, 0);
-            // Discard the self argument that we pass
-            mh = MethodHandles.dropArguments(mh, 0, O);
-        } else {
-            // Skip self parameter: start at one
-            mh = adapt(raw, 1);
+        MethodType expectedType;
+        switch (ap.methodKind) {
+            case STATIC:
+                // No self parameter: start at zero (unlike CPython)
+                mh = adapt(raw, 0);
+                expectedType = boundType;
+                break;
+            case NEW:
+                // First parameter is a PyType: start adaptors at one
+                mh = adapt(raw, 1);
+                expectedType = boundType;
+                break;
+            case INSTANCE:
+            case CLASS:
+                // Skip self parameter: start adaptors at one
+                mh = adapt(raw, 1);
+                expectedType = instanceType;
+                break;
+            default:
+                throw new InterpreterError("Unknown MethodKind %s",
+                        ap.methodKind);
         }
         if (useArray) {
             // We will present the last n args as an array
             int n = ap.argnames.length;
             mh = mh.asSpreader(OA, n);
         }
-        return mh.asType(instanceType);
+        return mh.asType(expectedType);
     }
 
     /**
@@ -233,20 +250,14 @@ enum MethodSignature {
      * @param pos index in the type at which to start.
      * @return handle compatible with {@code methodDef}
      */
-    static final MethodHandle adapt(MethodHandle raw, int pos) {
-        /*
-         * To begin with, adapt the arguments after self to expect a
-         * java.lang.Object, if Clinic knows how to convert them.
-         */
+    private static final MethodHandle adapt(MethodHandle raw, int pos) {
+        // Create the filter based on actual types in raw
         MethodType mt = raw.type();
         MethodHandle[] af = Clinic.argumentFilter(mt, pos);
+        // filterArguments returns raw if af.size==0 or all nulls
         MethodHandle mh = filterArguments(raw, pos, af);
         MethodHandle rf = Clinic.returnFilter(mt);
         if (rf != null) { mh = filterReturnValue(mh, rf); }
-        /*
-         * Let the method definition enforce specific constraints and
-         * conversions on the handle.
-         */
         return mh;
     }
 }

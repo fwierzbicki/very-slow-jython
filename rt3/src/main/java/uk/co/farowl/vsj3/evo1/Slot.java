@@ -131,12 +131,12 @@ enum Slot {
      * Defines {@link Operations#op_iter}, get an iterator, with
      * signature {@link Signature#UNARY}.
      */
-    op_iter(Signature.UNARY), // unexplored territory
+    op_iter(Signature.UNARY),
     /**
      * Defines {@link Operations#op_next}, advance an iterator, with
      * signature {@link Signature#UNARY}.
      */
-    op_next(Signature.UNARY), // unexplored territory
+    op_next(Signature.UNARY),
 
     /**
      * Defines {@link Operations#op_get}, descriptor {@code __get__},
@@ -159,6 +159,7 @@ enum Slot {
      * signature {@link Signature#INIT}.
      */
     op_init(Signature.INIT),
+
     // __new__ is not a slot
     // __del__ is not a slot
 
@@ -958,7 +959,7 @@ enum Slot {
         },
 
         /**
-         * The signature {@code (O,O,O[],S[])V}, used for
+         * The signature {@code (O,O[],S[])V}, used for
          * {@link Slot#op_init}. This is the same as {@link #CALL}
          * except with {@code void} return.
          */

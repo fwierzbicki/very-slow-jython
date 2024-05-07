@@ -1,4 +1,4 @@
-// Copyright (c)2022 Jython Developers.
+// Copyright (c)2023 Jython Developers.
 // Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
@@ -28,6 +28,8 @@ abstract class Descriptor extends AbstractPyObject {
             "descriptor '%s' of '%.100s' object needs an argument";
     protected static final String DESCRIPTOR_REQUIRES =
             "descriptor '%s' requires a '%.100s' object but received a '%.100s'";
+    private static final String QUALNAME_IS_NOT_A_STRING =
+            "<descriptor>.__objclass__.__qualname__ is not a string";
     /** Single re-used instance of {@link Slot.EmptyException} */
     protected static final EmptyException EMPTY = new EmptyException();
 
@@ -45,6 +47,7 @@ abstract class Descriptor extends AbstractPyObject {
      * is exposed to Python as {@code __name__}.
      */
     // In CPython, called d_name
+    @Exposed.Member(value = "__name__", readonly = true)
     protected final String name;
 
     /**
@@ -55,6 +58,15 @@ abstract class Descriptor extends AbstractPyObject {
     // In CPython, called d_qualname. Where used? Better computed?
     protected String qualname = null;
 
+    /**
+     * Constructor specifying the Python type, as returned by
+     * {@link #getType()}. As this is a base for the implementation of
+     * all sorts of Python types, it needs to be told which one it is.
+     *
+     * @param objclass that defines the attribute being described
+     * @param name of the object described as {@code __name__}
+     * @param descrtype actual Python type being created
+     */
     Descriptor(PyType descrtype, PyType objclass, String name) {
         super(descrtype);
         this.objclass = objclass;
@@ -138,18 +150,15 @@ abstract class Descriptor extends AbstractPyObject {
             throws AttributeError, Throwable {
         Object type_qualname =
                 Abstract.getAttr(objclass, "__qualname__");
-        if (type_qualname == null)
-            return null;
-        // XXX use PyUnicode.TYPE.check()
-        if (!(PyType.of(type_qualname).isSubTypeOf(PyUnicode.TYPE))) {
-            throw new TypeError(
-                    "<descriptor>.__objclass__.__qualname__ is not a unicode object");
+        if (!PyUnicode.TYPE.check(type_qualname)) {
+            throw new TypeError(QUALNAME_IS_NOT_A_STRING);
         }
         return String.format("%s.%s", type_qualname, name);
     }
 
     // Compare CPython descr_get_qualname in descrobject.c
-    static Object descr_get_qualname(Descriptor descr, Object ignored)
+    static Object descr_get_qualname(Descriptor descr,
+            @SuppressWarnings("unused") Object ignored)
             throws AttributeError, Throwable {
         if (descr.qualname == null)
             descr.qualname = descr.calculate_qualname();

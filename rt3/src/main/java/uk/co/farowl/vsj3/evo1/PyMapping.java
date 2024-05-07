@@ -17,32 +17,146 @@ public class PyMapping extends PySequence {
     protected PyMapping() {}    // only static methods here
 
     /**
+     * Check that an object o is a Python mapping, defined as supporting
+     * {@code __getitem__}.
+     *
+     * @param o to test
+     * @return whether defines {@code __getitem__}
+     */
+    // Compare CPython PyMapping_Check in abstract.c
+    static boolean check(Object o) {
+        Operations ops = Operations.of(o);
+        return Slot.op_getitem.isDefinedFor(ops);
+    }
+
+    /**
      * Return the mapping object {@code o} as a Java {@code Map}. If
      * {@code o} is one of several built-in types that implement Java
      * {@code Map<Object, Object>}, this will be the object itself.
      * Otherwise, it will be an adapter on the provided object.
      *
-     * @param <K> Object (distinguished here for readability)
-     * @param <V> Object (distinguished here for readability)
      * @param o to present as a map
      * @return the map
      */
-    static <K, V> Map<K, V> map(Object o) {
-        if (PyDict.TYPE.check(o)) {
-            return (Map<K, V>)o;
+    static Map<Object, Object> map(Object o) {
+        if (o instanceof PyDict) {
+            return (PyDict)o;
         } else {
-            return new MapWrapper<K, V>(o);
+            return new MapWrapper(o);
         }
     }
 
-    static class MapWrapper<K, V> extends AbstractMap<K, V> {
+    /**
+     * A wrapper on objects that conform to the Python mapping protocol,
+     * to make them act (almost) as a Java {@code Map}.
+     */
+    static class MapWrapper extends AbstractMap<Object, Object> {
         private final Object map;
 
+        /**
+         * Create a wrapper on an object to treat it as a Python mapping
+         * producing a Java {@code Map<Object,Object>} from it.
+         *
+         * @param map to wrap
+         */
         MapWrapper(Object map) { this.map = map; }
 
+        // XXX Add a static method to check if possible.
+        // Look for __getitem__, keys (etc. if write needed).
+
+        /**
+         * Determine whether an object claimed to be a map supports the
+         * operations necessary to be read and iterated as a Python
+         * mapping.
+         *
+         * @param map to test
+         * @return true iff {@code __getitem__} and {@code keys()} are
+         *     defined.
+         */
+        static boolean check(Object map) { return check(map, true); }
+
+        /**
+         * Determine whether an object claimed to be a map supports the
+         * operations necessary to be read, written and iterated as a
+         * Python mapping.
+         *
+         * @param map to test
+         * @return true iff {@code __getitem__}, {@code __setitem__} and
+         *     {@code keys()} are defined.
+         */
+        static boolean checkWrite(Object map) {
+            return check(map, false);
+        }
+
+        // Helper for check and checkWrite
+        private static boolean check(Object map, boolean readonly) {
+            Operations ops = Operations.of(map);
+            try {
+                return Slot.op_getitem.isDefinedFor(ops)
+                        && Abstract.lookupAttr(map, "keys") != null
+                        && (readonly
+                                || Slot.op_setitem.isDefinedFor(ops));
+            } catch (Throwable e) {
+                return false;
+            }
+        }
+
         @Override
-        public Set<Entry<K, V>> entrySet() {
+        public Set<Entry<Object, Object>> entrySet() {
             return new EntrySetImpl();
+        }
+
+        @Override
+        public Object get(Object key) {
+            try {
+                return getItem(map, key);
+            } catch (Throwable t) {
+                // Tunnel out non-Python errors as internal
+                throw asUnchecked(t, "during map.get(%.50s)", key);
+            }
+        }
+
+        /**
+         * @return {@code null}
+         * @implNote This implementation always returns {@code null} as
+         *     if there was previously no binding for the key in the
+         *     map. This is to avoid the cost of interrogating the
+         *     wrapped object.
+         */
+        @Override
+        public Object put(Object key, Object value) {
+            try {
+                setItem(map, key, value);
+                return null;
+            } catch (Throwable t) {
+                throw asUnchecked(t, "during map.put(%.50s, ...)", key);
+            }
+        }
+
+        /**
+         * @return {@code null}
+         * @implNote This implementation always returns {@code null} as
+         *     if there was previously no binding for the key in the
+         *     map. This is to avoid the cost of interrogating the
+         *     wrapped object.
+         */
+        @Override
+        public Object remove(Object key) {
+            try {
+                delItem(map, key);
+                return null;
+            } catch (Throwable t) {
+                throw asUnchecked(t, "during map.put(%.50s, ...)", key);
+            }
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder builder = new StringBuilder();
+            builder.append("MapWrapper [map=");
+            builder.append(map);
+            builder.append("]");
+            return builder.toString();
         }
 
         /**
@@ -50,10 +164,11 @@ public class PyMapping extends PySequence {
          * {@link MapWrapper#entrySet()}, and provides the view of the
          * entries in the object supplied to the constructor.
          */
-        private class EntrySetImpl extends AbstractSet<Entry<K, V>> {
+        private class EntrySetImpl
+                extends AbstractSet<Entry<Object, Object>> {
 
             @Override
-            public Iterator<Entry<K, V>> iterator() {
+            public Iterator<Entry<Object, Object>> iterator() {
                 return new EntrySetIteratorImpl();
             }
 
@@ -62,7 +177,7 @@ public class PyMapping extends PySequence {
                 try {
                     return PySequence.size(map);
                 } catch (Throwable t) {
-                    throw asUnchecked(t);
+                    throw asUnchecked(t, "during map.size()");
                 }
             }
         }
@@ -74,7 +189,7 @@ public class PyMapping extends PySequence {
          * It is backed by a Python iterator on the underlying map.
          */
         private class EntrySetIteratorImpl
-                implements Iterator<Entry<K, V>> {
+                implements Iterator<Entry<Object, Object>> {
 
             /**
              * A key object waits here that has been read from the map,
@@ -82,15 +197,15 @@ public class PyMapping extends PySequence {
              * returned in a pair by {@link #next()},
              */
             private final Object keyIterator;
-            private K nextKey = null;
-            private K currKey = null;
+            private Object nextKey = null;
+            private Object currKey = null;
             private boolean exhausted = false;
 
             EntrySetIteratorImpl() throws TypeError {
                 try {
-                    this.keyIterator = Abstract.getIterator(map);
+                    keyIterator = Callables.callMethod(map, "keys");
                 } catch (Throwable t) {
-                    throw asUnchecked(t);
+                    throw asUnchecked(t, "getting iterator");
                 }
             }
 
@@ -108,12 +223,12 @@ public class PyMapping extends PySequence {
                     // This does not advance this iterator, but ...
                     try {
                         // ... we advance keyIterator to peek at next.
-                        nextKey = (K)Abstract.next(keyIterator);
+                        nextKey = Abstract.next(keyIterator);
                     } catch (StopIteration si) {
                         exhausted = true;
                         return false;
                     } catch (Throwable t) {
-                        throw asUnchecked(t);
+                        throw asUnchecked(t, "during map.hasNext()");
                     }
                 }
                 assert nextKey != null;
@@ -122,17 +237,17 @@ public class PyMapping extends PySequence {
             }
 
             @Override
-            public Entry<K, V> next() {
+            public Entry<Object, Object> next() {
                 if (hasNext()) {
                     // hasNext()==true has already set nextKey
-                    K k = nextKey;
+                    Object k = nextKey;
                     try {
-                        V v = (V)getItem(map, k);
+                        Object v = getItem(map, k);
                         currKey = k;
                         nextKey = null;
-                        return new SimpleEntry<K, V>(k, v);
+                        return new SimpleEntry<Object, Object>(k, v);
                     } catch (Throwable t) {
-                        throw asUnchecked(t);
+                        throw asUnchecked(t, "during map.next()");
                     }
                 } else {
                     throw new NoSuchElementException("Python iterator");
@@ -149,11 +264,11 @@ public class PyMapping extends PySequence {
                         delItem(map, currKey);
                         currKey = null;
                     } catch (Throwable t) {
-                        throw asUnchecked(t);
+                        throw asUnchecked(t, "during map.remove(%.50s)",
+                                currKey);
                     }
                 }
             }
         }
-
     }
 }

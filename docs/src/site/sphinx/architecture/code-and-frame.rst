@@ -4,6 +4,10 @@
 Types of ``code`` and ``frame`` Object
 ######################################
 
+.. note::
+    Re-visit 3.11 source code and correct details where different.
+    Anything involving opcodes will have changed.
+
 Several Types of Code
 *********************
 
@@ -27,6 +31,11 @@ to have more than one kind of ``PyFrame``.
 The idea briefly, explored more fully below,
 is to regard the code object as a factory
 for the particular type of frame that it needs.
+
+So far the project has targeted CPython 3.8 byte code,
+in the class ``CPython38Frame``,
+a specialisation of ``PyFrame``.
+Each supported version of the byte code should have its own frame sub-class.
 
 .. "explored more fully below" when I have the time
 

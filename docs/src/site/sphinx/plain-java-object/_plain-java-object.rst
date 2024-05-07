@@ -23,6 +23,8 @@ Concepts developed in sub-project ``rt2`` will be heavily re-used.
     operations-builtin
     hash-dictionary
     built-in-methods
+    modules-in-java
+    type-new-init
 
 ..  A reminder of the chapters in the rt2 chapter:
     interpreter-cpython-byte-code

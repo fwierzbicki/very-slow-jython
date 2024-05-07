@@ -1,4 +1,4 @@
-// Copyright (c)2022 Jython Developers.
+// Copyright (c)2023 Jython Developers.
 // Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
@@ -11,6 +11,7 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -134,20 +135,38 @@ abstract class Exposer {
      * @throws InterpreterError on duplicates or unsupported types
      */
     void scanJavaMethods(Class<?> defsClass) throws InterpreterError {
-
         // Iterate over methods looking for the relevant annotations
-        for (Method m : defsClass.getDeclaredMethods()) {
-            PythonMethod a =
-                    m.getDeclaredAnnotation(PythonMethod.class);
-            if (a != null) { addMethodSpec(m, a); }
+        for (Class<?> c : superClasses(defsClass)) {
+            for (Method m : c.getDeclaredMethods()) {
+                PythonMethod a =
+                        m.getDeclaredAnnotation(PythonMethod.class);
+                if (a != null) { addMethodSpec(m, a); }
+            }
         }
     }
 
     /**
-     * Process an annotation that identifies a method of a Python type
-     * or module defined in Java as one to be exposed to Python, into a
-     * specification for a method descriptor, and add it to the table of
-     * specifications by name.
+     * Walk down to a given class through all super-classes that might
+     * contain items to expose. We do not need to include classes not
+     * created with a knowledge of Jython. (This is why it doesn't start
+     * with {@code java.lang.Object}).
+     *
+     * @param c given ending class
+     * @return super-classes descending to {@code c}
+     */
+    static Collection<Class<?>> superClasses(Class<?> c) {
+        LinkedList<Class<?>> classes = new LinkedList<>();
+        while (c != null && c != Object.class) {
+            classes.addFirst(c);
+            c = c.getSuperclass();
+        }
+        return classes;
+    }
+
+    /**
+     * Process an annotation that identifies an instance method of a
+     * Python type or module defined in Java, into a specification for a
+     * method, and add it to the table of specifications by name.
      *
      * @param anno annotation encountered
      * @param meth method annotated
@@ -169,14 +188,13 @@ abstract class Exposer {
         // Now use the generic create/update
         addSpec(meth, anno.value(), cast,
                 (String name) -> new MethodSpec(name, kind()),
-                ms -> { methodSpecs.add(ms); }, addMethod);
+                ms -> methodSpecs.add(ms), addMethod);
     }
 
     /**
-     * Process an annotation that identifies a method of a Python type
-     * or module defined in Java as one to be exposed to Python, into a
-     * specification for a method descriptor, and add it to the table of
-     * specifications by name.
+     * Process an annotation that identifies a static method of a Python
+     * type or module defined in Java, into a specification for a
+     * method, and add it to the table of specifications by name.
      *
      * @param anno annotation encountered
      * @param meth method annotated
@@ -198,7 +216,7 @@ abstract class Exposer {
         // Now use the generic create/update
         addSpec(meth, anno.value(), cast,
                 (String name) -> new StaticMethodSpec(name, kind()),
-                ms -> { methodSpecs.add(ms); }, addMethod);
+                ms -> methodSpecs.add(ms), addMethod);
     }
 
     /**
@@ -318,8 +336,9 @@ abstract class Exposer {
         }
 
         /**
-         * Create an attribute for the type being defined (suitable as
-         * an entry in its dictionary).
+         * Create an attribute for a type being defined (suitable as an
+         * entry in its dictionary). Note this is called only during
+         * type definition, not at module level.
          *
          * @param objclass defining type
          * @param lookup authorisation to access methods or fields
@@ -650,10 +669,11 @@ abstract class Exposer {
             if (parser == null && parameterNames != null
                     && parameterNames.length >= posonlyargcount) {
                 parser = new ArgParser(name, scopeKind, methodKind,
-                        varArgsIndex >= 0, varKeywordsIndex >= 0,
-                        posonlyargcount, kwonlyargcount, parameterNames,
-                        regargcount);
-                parser.defaults(defaults).kwdefaults(kwdefaults);
+                        parameterNames, regargcount, posonlyargcount,
+                        kwonlyargcount, varArgsIndex >= 0,
+                        varKeywordsIndex >= 0);
+                parser.defaults(defaults).kwdefaults(kwdefaults)
+                        .doc(doc);
             }
             return parser;
         }
@@ -1109,6 +1129,10 @@ abstract class Exposer {
         private static Object eval(String s) {
             if (s == null || s.equals("None")) {
                 return Py.None;
+            } else if (s.equals("False") || s.equals("false")) {
+                return true;
+            } else if (s.equals("True") || s.equals("true")) {
+                return true;
             } else if (s.matches(REGEX_INT)) {
                 // Small integer if we can; big if we can't
                 BigInteger b = new BigInteger(s);
@@ -1118,9 +1142,10 @@ abstract class Exposer {
                     return b;
                 }
             } else if (s.matches(REGEX_FLOAT)) {
-                return Float.valueOf(s);
+                return Double.valueOf(s);
             } else if (s.matches(REGEX_STRING)) {
-                return Float.valueOf(s);
+                // TODO Parse this properly as a str constant
+                return s.substring(1, s.length()-1);
             } else {
                 // A somewhat lazy fall-back
                 return s;
@@ -1204,14 +1229,14 @@ abstract class Exposer {
          * <p>
          * In a type, the attribute must be represented by a descriptor
          * for the Python method from this specification. This method
-         * create a {@code PyMethodDescr} from the specification.
+         * creates a {@code PyMethodDescr} from the specification.
          * <p>
          * Note that a specification describes the methods as declared,
          * and that there may be any number of them, even if there is
          * only one implementation of the target type. The specification
          * may therefore have collected multiple Java definitions of the
          * same name.
-         *
+         * <p>
          * This method creates a descriptor that matches them to the
          * accepted implementations of the owning class. The descriptor
          * returned will contain one method handle for each accepted
@@ -1228,9 +1253,9 @@ abstract class Exposer {
                 throws InterpreterError {
 
             ArgParser ap = new ArgParser(name, scopeKind,
-                    MethodKind.INSTANCE, varArgsIndex >= 0,
-                    varKeywordsIndex >= 0, posonlyargcount,
-                    kwonlyargcount, parameterNames, regargcount);
+                    MethodKind.INSTANCE, parameterNames, regargcount,
+                    posonlyargcount, kwonlyargcount, varArgsIndex >= 0,
+                    varKeywordsIndex >= 0);
             ap.defaults(defaults).kwdefaults(kwdefaults);
 
             // Methods have self + this many args:
@@ -1269,10 +1294,46 @@ abstract class Exposer {
             super(name, scopeKind);
         }
 
+        /**
+         * {@inheritDoc}
+         * <p>
+         * In a type, the attribute representing a static Python method
+         * is a {@code PyStaticMethod} wrapping a
+         * {@code PyJavaFunction}. This method creates it from the
+         * specification.
+         * <p>
+         * Note that a specification describes the method as declared,
+         * and that there must be exactly one, even if there are
+         * multiple implementations of the type.
+         *
+         * @param objclass Python type that owns the descriptor
+         * @param lookup authorisation to access members
+         * @return descriptor for access to the method
+         * @throws InterpreterError if the method type is not supported
+         */
         @Override
-        PyJavaMethod asAttribute(PyType objclass, Lookup lookup) {
-            // TODO Auto-generated method stub
-            return null;
+        PyStaticMethod asAttribute(PyType objclass, Lookup lookup) {
+            assert methodKind == MethodKind.STATIC;
+            ArgParser ap = getParser();
+
+            // There should be exactly one candidate implementation.
+            if (methods.size() != 1) {
+                throw new InterpreterError(
+                        "static method %s has %d definitions in ", name,
+                        methods.size(), getJavaName());
+            }
+
+            Method m = methods.get(0);
+            try {
+                // Convert m to a handle (if accessible)
+                MethodHandle mh = lookup.unreflect(m);
+                assert mh.type().parameterCount() == regargcount;
+                PyJavaFunction javaFunction =
+                        PyJavaFunction.forStaticMethod(ap, mh);
+                return new PyStaticMethod(objclass, javaFunction);
+            } catch (IllegalAccessException e) {
+                throw cannotGetHandle(m, e);
+            }
         }
 
         @Override

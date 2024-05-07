@@ -1,4 +1,4 @@
-// Copyright (c)2022 Jython Developers.
+// Copyright (c)2023 Jython Developers.
 // Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
@@ -18,7 +18,7 @@ import uk.co.farowl.vsj3.evo1.base.MethodKind;
  * Descriptor for a method defined in Java, that is to be called from
  * Python. A {@code PyMethodDescr} is a callable object itself, and
  * provides binding behaviour through {@link #__get__(Object, PyType)
- * __get__}, which usually creates a {@link PyJavaMethod}.
+ * __get__}, which usually creates a {@link PyJavaFunction}.
  * <p>
  * It suits us to sub-class {@code PyMethodDescr} to express the
  * multiplicity of implementations and to respond to the signature of
@@ -70,7 +70,7 @@ abstract class PyMethodDescr extends MethodDescriptor {
 
     /**
      * Deduced method signature (useful to have cached when constructing
-     * a {@link PyJavaMethod}). Note that this is allowed to differ from
+     * a {@link PyJavaFunction}). Note that this is allowed to differ from
      * {@link MethodSignature#fromParser(ArgParser)
      * MethodSignature.fromParser(argParser)}.
      */
@@ -367,9 +367,10 @@ abstract class PyMethodDescr extends MethodDescriptor {
      *
      * @param args all arguments beginning with {@code self}
      * @param names of keyword arguments
-     * @return result of calling the wrapped method
-     * @throws TypeError if {@code args[0]} is of the wrong type
-     * @throws Throwable from the implementation of the special method
+     * @return result of calling the method represented
+     * @throws TypeError if {@code args[0]} is of the wrong type or the
+     *     pattern of arguments is unacceptable (number, keyword use).
+     * @throws Throwable from the implementation of the method
      */
     Object __call__(Object[] args, String[] names)
             throws TypeError, Throwable {
@@ -423,7 +424,7 @@ abstract class PyMethodDescr extends MethodDescriptor {
     /**
      * Return the described method, bound to {@code obj} as its "self"
      * argument, or if {@code obj==null}, return this descriptor. In the
-     * non-null case, {@code __get__} returns a {@link PyJavaMethod}.
+     * non-null case, {@code __get__} returns a {@link PyJavaFunction}.
      * Calling the returned object invokes the same Java method as this
      * descriptor, with {@code obj} as first argument, and other
      * arguments to the call appended.
@@ -444,26 +445,21 @@ abstract class PyMethodDescr extends MethodDescriptor {
         else {
             // Return a callable binding the method and the target
             check(obj);
-            return PyJavaMethod.from(this, obj);
+            return PyJavaFunction.from(this, obj);
         }
     }
 
     // exposed methods -----------------------------------------------
 
-    /** @return name of the function or method */
-    // Compare CPython meth_get__name__ in methodobject.c
-    @Exposed.Getter
-    String __name__() { return argParser.name; }
-
     // Compare CPython method_get_doc in descrobject.c
     Object get_doc() {
-        return PyType.getDocFromInternalDoc(__name__(), argParser.doc);
+        return PyType.getDocFromInternalDoc(name, argParser.doc());
     }
 
     // Compare CPython method_get_text_signature in descrobject.c
     Object get_text_signature() {
-        return PyType.getTextSignatureFromInternalDoc(__name__(),
-                argParser.doc);
+        return PyType.getTextSignatureFromInternalDoc(name,
+                argParser.doc());
     }
 
     // plumbing ------------------------------------------------------
@@ -507,7 +503,7 @@ abstract class PyMethodDescr extends MethodDescriptor {
                 // No match means no implementation we can use
                 throw new InterpreterError(
                         "'%s.%s' not implemented for %s", objclass.name,
-                        __name__(), objclass.classes[i]);
+                        name, objclass.classes[i]);
             }
         }
         return methods;

@@ -1,3 +1,5 @@
+// Copyright (c)2023 Jython Developers.
+// Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1.modules;
 
 import java.io.DataInputStream;
@@ -18,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import uk.co.farowl.vsj3.evo1.Abstract;
-import uk.co.farowl.vsj3.evo1.CPython38Code;
+import uk.co.farowl.vsj3.evo1.CPython311Code;
 import uk.co.farowl.vsj3.evo1.EOFError;
 import uk.co.farowl.vsj3.evo1.Exposed.Default;
 import uk.co.farowl.vsj3.evo1.Exposed.Member;
@@ -1120,7 +1122,7 @@ public class marshal /* extends JavaModule */ {
     static {
         register(new SingletonCodec(TYPE_NULL, null));
         register(new SingletonCodec(TYPE_NONE, Py.None));
-        // register(new SingletonCodec(TYPE_ELLIPSIS, Py.Ellipsis));
+        register(new SingletonCodec(TYPE_ELLIPSIS, Py.Ellipsis));
     }
 
     /**
@@ -1518,10 +1520,9 @@ public class marshal /* extends JavaModule */ {
              * We intend different concrete sub-classes of PyCode, that
              * create different frame types, but at the moment only one.
              */
-            CPython38Code code = (CPython38Code)v;
+            CPython311Code code = (CPython311Code)v;
             w.writeByte(TYPE_CODE);
-            // Write the fields (quite complicated)
-            // XXX
+            // XXX Write the fields (quite complicated)
         }
 
         @Override
@@ -1529,35 +1530,42 @@ public class marshal /* extends JavaModule */ {
             return Map.of(TYPE_CODE, CodeCodec::read);
         }
 
-        private static CPython38Code read(Reader r, boolean ref) {
+        private static CPython311Code read(Reader r, boolean ref) {
 
             // Get an index now to ensure encounter-order numbering
             int idx = ref ? r.reserveRef() : -1;
 
-            /* XXX ignore long->int overflows for now */
             int argcount = r.readInt();
             int posonlyargcount = r.readInt();
             int kwonlyargcount = r.readInt();
-            int nlocals = r.readInt();
             int stacksize = r.readInt();
+
             int flags = r.readInt();
             Object code = r.readObject();
+
             Object consts = r.readObject();
             Object names = r.readObject();
-            Object varnames = r.readObject();
-            Object freevars = r.readObject();
-            Object cellvars = r.readObject();
+            Object localsplusnames = r.readObject();
+            Object localspluskinds = r.readObject();
+
             Object filename = r.readObject();
             Object name = r.readObject();
+            Object qualname = r.readObject();
+
             int firstlineno = r.readInt();
-            Object lnotab = r.readObject();
+            Object linetable = r.readObject();
+            Object exceptiontable = r.readObject();
 
             // PySys_Audit("code.__new__", blah ...);
 
-            CPython38Code v = CPython38Code.create(argcount,
-                    posonlyargcount, kwonlyargcount, nlocals, stacksize,
-                    flags, code, consts, names, varnames, freevars,
-                    cellvars, filename, name, firstlineno, lnotab);
+            CPython311Code v = CPython311Code.create( //
+                    filename, name, qualname, flags, //
+                    code, firstlineno, linetable, //
+                    consts, names, //
+                    localsplusnames, localspluskinds, //
+                    argcount, posonlyargcount, kwonlyargcount,
+                    stacksize, //
+                    exceptiontable);
 
             return r.defineRef(v, idx);
         }

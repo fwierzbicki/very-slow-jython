@@ -1,4 +1,4 @@
-// Copyright (c)2021 Jython Developers.
+// Copyright (c)2023 Jython Developers.
 // Licensed to PSF under a contributor agreement.
 package uk.co.farowl.vsj3.evo1;
 
@@ -87,6 +87,34 @@ public class Abstract {
             } else {
                 return repr(o);
             }
+        }
+    }
+
+    /**
+     * Convert a given {@code Object} to an instance of a Java class.
+     * Raise a {@code TypeError} if the conversion fails.
+     *
+     * @param <T> target type defined by {@code c}
+     * @param o the {@code Object} to convert.
+     * @param c the class to convert it to.
+     * @return converted value
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> T tojava(Object o, Class<T> c) {
+        try {
+            // XXX Stop-gap implementation (just cast it)
+            if (c.isAssignableFrom(o.getClass())) {
+                return (T)o;
+            } else {
+                throw new Slot.EmptyException();
+            }
+            // XXX Replace when this slot is defined:
+            // return (T)Operations.of(o).op_tojava.invokeExact(o, c);
+        } catch (NullPointerException npe) {
+            // Probably an error, but easily converted.
+            return null;
+        } catch (Slot.EmptyException e) {
+            throw typeError("cannot convert %s to %s", o, c.getName());
         }
     }
 
@@ -261,10 +289,40 @@ public class Abstract {
     }
 
     /**
+     * Python {@code o.name} returning {@code null} when not found (in
+     * place of {@code AttributeError} as would
+     * {@link #getAttr(Object, String)}). Other exceptions that may be
+     * raised in the process propagate.
+     *
+     * @param o the object in which to look for the attribute
+     * @param name of the attribute sought
+     * @return the attribute or {@code null}
+     * @throws Throwable on other errors than {@code AttributeError}
+     */
+    // Compare CPython _PyObject_LookupAttr in object.c
+    public static Object lookupAttr(Object o, String name)
+            throws TypeError, Throwable {
+        // Decisions are based on type of o (that of name is known)
+        Operations ops = Operations.of(o);
+        try {
+            // Invoke __getattribute__
+            return ops.op_getattribute.invokeExact(o, name);
+        } catch (EmptyException | AttributeError e) {
+            try {
+                // Not found or not defined: fall back on __getattr__.
+                return ops.op_getattr.invokeExact(o, name);
+            } catch (EmptyException | AttributeError ignored) {
+                // __getattr__ not defined, original exception stands.
+                return null;
+            }
+        }
+    }
+
+    /**
      * Python {@code o.name}: returning {@code null} when not found (in
      * place of {@code AttributeError} as would
      * {@link #getAttr(Object, Object)}). Other exceptions that may be
-     * raised in the process, propagate.
+     * raised in the process propagate.
      *
      * @param o the object in which to look for the attribute
      * @param name of the attribute sought
@@ -278,30 +336,6 @@ public class Abstract {
         // Decisions are based on types of o and name
         return lookupAttr(o, PyUnicode.asString(name,
                 Abstract::attributeNameTypeError));
-    }
-
-    /**
-     * Python {@code o.name} returning {@code null} when not found (in
-     * place of {@code AttributeError} as would
-     * {@link #getAttr(Object, String)}). Other exceptions that may be
-     * raised in the process, propagate.
-     *
-     * @param o the object in which to look for the attribute
-     * @param name of the attribute sought
-     * @return the attribute or {@code null}
-     * @throws Throwable on other errors than {@code AttributeError}
-     */
-    // Compare CPython _PyObject_LookupAttr in object.c
-    public static Object lookupAttr(Object o, String name)
-            throws TypeError, Throwable {
-        // Decisions are based on type of o (that of name is known)
-        try {
-            // Invoke __getattribute__
-            MethodHandle getattro = Operations.of(o).op_getattribute;
-            return getattro.invokeExact(o, name);
-        } catch (EmptyException | AttributeError e) {
-            return null;
-        }
     }
 
     /**
@@ -433,45 +467,6 @@ public class Abstract {
         Object klass = lookupAttr(inst, "__class__");
         // Treat non-tuple as not having the attribute.
         return klass instanceof PyType ? (PyType)klass : null;
-    }
-
-    /**
-     * Return {@code true} iff {@code derived} is a Python sub-class of
-     * {@code cls} (including where it is the same class). The answer is
-     * found by traversing the {@code __bases__} tuples recursively,
-     * therefore does not depend on the MRO or respect
-     * {@code __subclasscheck__}.
-     *
-     * @param derived candidate derived type
-     * @param cls type that may be an ancestor of {@code derived}
-     * @return whether {@code derived} is a sub-class of {@code cls}
-     * @throws Throwable from looking up {@code __bases__}
-     */
-    // Compare CPython abstract_issubclass in abstract.c
-    private static boolean isSubclassHelper(Object derived, Object cls)
-            throws Throwable {
-        while (derived != cls) {
-            // Consider the bases of derived
-            PyTuple bases = getBasesOf(derived);
-            int n;
-            // derived is a subclass of cls if any of its bases is
-            if (bases == null || (n = bases.size()) == 0) {
-                // The __bases__ tuple is missing or empty ...
-                return false;
-            } else if (n == 1) {
-                // The answer is the answer for that single base.
-                derived = bases.get(0);
-            } else {
-                // several bases so work through them in sequence
-                for (int i = 0; i < n; i++) {
-                    if (isSubclassHelper(bases.get(i), cls))
-                        return true;
-                }
-                // And not otherwise
-                return false;
-            }
-        }
-        return true;
     }
 
     /**
@@ -823,9 +818,8 @@ public class Abstract {
     // Plumbing -------------------------------------------------------
 
     /**
-     * Crafted error supporting {@link #getAttr(Object, PyUnicode)},
-     * {@link #setAttr(Object, PyUnicode, Object)}, and
-     * {@link #delAttr(Object, PyUnicode)}.
+     * Crafted error supporting {@link #setAttr(Object, String, Object)
+     * setAttr} and {@link #delAttr(Object, String) delAttr}.
      *
      * @param o object accessed
      * @param name of attribute
@@ -850,10 +844,12 @@ public class Abstract {
         }
         // Can we even read this object's attributes?
         Operations ops = Operations.of(o);
-        kind = Slot.op_getattribute.isDefinedFor(ops) ? "only read-only"
-                : "no";
+        String typeName = ops.type(o).name;
+        boolean readable = Slot.op_getattribute.isDefinedFor(ops)
+                || Slot.op_getattr.isDefinedFor(ops);
+        kind = readable ? "only read-only" : "no";
         // Now we know what to say
-        return new TypeError(fmt, ops, kind, mode, name);
+        return new TypeError(fmt, typeName, kind, mode, name);
     }
 
     // Convenience functions constructing errors --------------------
@@ -870,6 +866,45 @@ public class Abstract {
             "%.200s object is not iterable";
     static final String DESCR_NOT_DEFINING =
             "Type marked as %.20s descriptor does not define %.50s";
+
+    /**
+     * Return {@code true} iff {@code derived} is a Python sub-class of
+     * {@code cls} (including where it is the same class). The answer is
+     * found by traversing the {@code __bases__} tuples recursively,
+     * therefore does not depend on the MRO or respect
+     * {@code __subclasscheck__}.
+     *
+     * @param derived candidate derived type
+     * @param cls type that may be an ancestor of {@code derived}
+     * @return whether {@code derived} is a sub-class of {@code cls}
+     * @throws Throwable from looking up {@code __bases__}
+     */
+    // Compare CPython abstract_issubclass in abstract.c
+    private static boolean isSubclassHelper(Object derived, Object cls)
+            throws Throwable {
+        while (derived != cls) {
+            // Consider the bases of derived
+            PyTuple bases = getBasesOf(derived);
+            int n;
+            // derived is a subclass of cls if any of its bases is
+            if (bases == null || (n = bases.size()) == 0) {
+                // The __bases__ tuple is missing or empty ...
+                return false;
+            } else if (n == 1) {
+                // The answer is the answer for that single base.
+                derived = bases.get(0);
+            } else {
+                // several bases so work through them in sequence
+                for (int i = 0; i < n; i++) {
+                    if (isSubclassHelper(bases.get(i), cls))
+                        return true;
+                }
+                // And not otherwise
+                return false;
+            }
+        }
+        return true;
+    }
 
     /**
      * Create a {@link TypeError} with a message involving the type of
@@ -960,7 +995,7 @@ public class Abstract {
      * [name] argument must be T, not X", involving a function name, an
      * argument name, an expected type description T and the type X of
      * {@code o}, e.g. "split() separator argument must be str or None,
-     * 'tuple'".
+     * not 'tuple'".
      *
      * @param f name of function or operation
      * @param name of argument
@@ -1053,11 +1088,11 @@ public class Abstract {
     }
 
     /**
-     * Create a {@link TypeError} with a message along the lines "N must
-     * be set to T, not a X object" involving the name N of the
+     * Create a {@link TypeError} with a message along the lines "'N'
+     * must be T, not 'X' as received" involving the name N of the
      * attribute, any descriptive phrase T and the type X of
-     * {@code value}, e.g. "<u>__dict__</u> must be set to <u>a
-     * dictionary</u>, not a '<u>list</u>' object".
+     * {@code value}, e.g. "'<u>__dict__</u>' must be <u>a
+     * dictionary</u>, not '<u>list</u>' as received".
      *
      * @param name of the attribute
      * @param kind expected kind of thing
@@ -1066,14 +1101,16 @@ public class Abstract {
      */
     static TypeError attrMustBe(String name, String kind,
             Object value) {
-        String msg = "%.50s must be set to %.50s, not a '%.50s' object";
-        return new TypeError(msg, name, kind,
+        return new TypeError(ATTR_TYPE, name, kind,
                 PyType.of(value).getName());
     }
 
+    private static final String ATTR_TYPE =
+            "'%.50s' must be %.50s, not '%.50s' as received";
+
     /**
-     * Create a {@link TypeError} with a message along the lines "N must
-     * be set to a string, not a X object".
+     * Create a {@link TypeError} with a message along the lines "'N'
+     * must be a string, not 'X' as received".
      *
      * @param name of the attribute
      * @param value provided to set this attribute in some object
@@ -1183,11 +1220,24 @@ public class Abstract {
 
     /**
      * Convert any {@code Throwable} except an {@code Error} to a
-     * {@code RuntimeException}, so that it becomes an unchecked
-     * exception. An {@code Error} is re-thrown directly. We use this in
-     * circumstances where a method cannot be declared to throw the
-     * exceptions that methods within it are declared to throw, and no
-     * specific handling is available locally.
+     * {@code RuntimeException}, as by
+     * {@link #asUnchecked(Throwable, String, Object...) asUnchecked(t,
+     * ...)} with a default message.
+     *
+     * @param t to propagate or encapsulate
+     * @return run-time exception to throw
+     */
+    static RuntimeException asUnchecked(Throwable t) {
+        return asUnchecked(t, "non-Python Exception");
+    }
+
+    /**
+     * Convert any {@code Throwable} except an {@code Error} to a
+     * {@code RuntimeException}, so that (if not already) it becomes an
+     * unchecked exception. An {@code Error} is re-thrown directly. We
+     * use this in circumstances where a method cannot be declared to
+     * throw the exceptions that methods within it are declared to
+     * throw, and no specific handling is available locally.
      * <p>
      * In particular, we use it where a call is made to
      * {@code MethodHandle.invokeExact}. That is declared to throw
@@ -1196,15 +1246,19 @@ public class Abstract {
      * error that the local code cannot be expected to handle.
      *
      * @param t to propagate or encapsulate
+     * @param during format string for detail message, typically like
+     *     "during map.get(%.50s)" where {@code args} contains the key.
+     * @param args to insert into format string.
      * @return run-time exception to throw
      */
-    static RuntimeException asUnchecked(Throwable t) {
+    static RuntimeException asUnchecked(Throwable t, String during,
+            Object... args) {
         if (t instanceof RuntimeException)
             return (RuntimeException)t;
         else if (t instanceof Error)
             throw (Error)t;
         else
-            return new InterpreterError(t, "non-Python Exception");
+            return new InterpreterError(t, during, args);
     }
 
     /**

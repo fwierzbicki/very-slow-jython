@@ -24,16 +24,17 @@ dependencies {
     api project(':rt2')
 
     // JUnit 5 dependencies
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.+'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.+'
 }
 
 
 // Task defined in root buildSrc
 task generateDynamicAPI(type: DynamicAPITask) {
+    dependsOn(compileJava)
     source = "src/main/dynamicAPI"
     // Mix output into Java plugin directory :(
-    destinationDir = file("$buildDir/classes/java/main")
+    destinationDirectory = file("$buildDir/classes/java/main")
     // Must be set but not actually consulted :(
     classpath = layout.files("$buildDir/classes/java/main")
 
